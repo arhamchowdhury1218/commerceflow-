@@ -8,6 +8,7 @@ import {
   Users,
   Package,
   Truck,
+  MessageCircle,
   BarChart2,
   Settings,
   LogOut,
@@ -24,6 +25,7 @@ import useAuthStore from "@/store/authStore";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
+  { to: "/inbox", icon: MessageCircle, label: "Inbox" },
   { to: "/orders", icon: ShoppingCart, label: "Orders" },
   { to: "/customers", icon: Users, label: "Customers" },
   { to: "/products", icon: Package, label: "Products" },

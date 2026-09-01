@@ -8,6 +8,7 @@ import EmptyState from "@/components/shared/EmptyState";
 import LoadingSpinner from "@/components/shared/LoadingSpinner";
 import DeliveryCard from "@/components/deliveries/DeliveryCard";
 import useDeliveries from "@/hooks/useDeliveries";
+import { orderIdMatches } from "@/lib/utils";
 
 export default function Deliveries() {
   const { deliveries, loading, fetchDeliveries, syncDelivery, syncAll } =
@@ -45,11 +46,12 @@ export default function Deliveries() {
   }, {});
 
   const filtered = deliveries.filter((d) => {
+    const rawSearch = search.trim().toLowerCase();
     const matchesSearch =
       search === "" ||
-      d.order?.customer?.name?.toLowerCase().includes(search.toLowerCase()) ||
-      d.tracking_number?.toLowerCase().includes(search.toLowerCase()) ||
-      String(d.order?.id).includes(search);
+      d.order?.customer?.name?.toLowerCase().includes(rawSearch) ||
+      d.tracking_number?.toLowerCase().includes(rawSearch) ||
+      orderIdMatches(d.order?.id, search);
 
     const matchesStatus =
       statusFilter === "all" || d.delivery_status === statusFilter;

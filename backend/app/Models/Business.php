@@ -13,6 +13,7 @@ class Business extends Model
         'user_id',
         'name',
         'facebook_page_id',
+        'facebook_page_token',
         'instagram_id',
         'whatsapp_number',
     ];
@@ -45,5 +46,11 @@ class Business extends Model
     public function subscription()
     {
         return $this->hasOne(Subscription::class);
+    }
+
+    // Business has many Messenger conversations
+    public function conversations()
+    {
+        return $this->hasMany(Conversation::class);
     }
 }

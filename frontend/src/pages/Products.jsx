@@ -1,12 +1,6 @@
-// src/pages/Products.jsx
-// CLEAN VERSION — all logic is in useProducts hook
-// all UI pieces are in components/products/
-// This page only: fetches data, filters it, renders components
-
 import { useState } from "react";
 import { AnimatePresence } from "framer-motion";
-import { Plus, AlertCircle, RefreshCw } from "lucide-react";
-import { Package } from "lucide-react";
+import { Plus, AlertCircle, RefreshCw, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import PageHeader from "@/components/shared/PageHeader";
 import SearchBar from "@/components/shared/SearchBar";
@@ -14,11 +8,16 @@ import EmptyState from "@/components/shared/EmptyState";
 import LoadingSpinner from "@/components/shared/LoadingSpinner";
 import ProductCard from "@/components/products/ProductCard";
 import AddProductModal from "@/components/products/AddProductModal";
+import { useConfirmDialog } from "@/components/shared/ConfirmDialog";
 import useProducts from "@/hooks/useProducts";
 
 export default function Products() {
   const { products, loading, fetchProducts, deleteProduct, toggleStatus } =
     useProducts();
+
+  // confirm is the function we pass down to ProductCard → deleteProduct
+  // ConfirmDialogComponent is the actual dialog rendered in JSX below
+  const { confirm, ConfirmDialogComponent } = useConfirmDialog();
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -69,7 +68,6 @@ export default function Products() {
         </Button>
       </PageHeader>
 
-      {/* Stock warnings */}
       {outOfStockProducts.length > 0 && (
         <div
           className="flex items-center gap-2 bg-red-50 dark:bg-red-950
@@ -84,6 +82,7 @@ export default function Products() {
           </p>
         </div>
       )}
+
       {lowStockProducts.length > 0 && (
         <div
           className="flex items-center gap-2 bg-amber-50 dark:bg-amber-950
@@ -98,7 +97,6 @@ export default function Products() {
         </div>
       )}
 
-      {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
         <SearchBar
           value={search}
@@ -124,7 +122,6 @@ export default function Products() {
         </div>
       </div>
 
-      {/* Content */}
       {loading ? (
         <LoadingSpinner text="Loading products..." />
       ) : filtered.length === 0 ? (
@@ -147,14 +144,16 @@ export default function Products() {
           }
         />
       ) : (
-        <div className="grid grid-cols-1 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((product, index) => (
             <ProductCard
               key={product.id}
               product={product}
               index={index}
-              onDelete={deleteProduct}
+              // Pass confirm down so ProductCard can trigger the dialog
+              onDelete={(id) => deleteProduct(id, confirm)}
               onToggleStatus={toggleStatus}
+              onSuccess={fetchProducts}
             />
           ))}
         </div>
@@ -168,6 +167,9 @@ export default function Products() {
           />
         )}
       </AnimatePresence>
+
+      {/* The confirm dialog — renders as a portal overlay when triggered */}
+      {ConfirmDialogComponent}
     </div>
   );
 }

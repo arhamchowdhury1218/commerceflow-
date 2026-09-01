@@ -1,5 +1,3 @@
-// src/components/orders/OrderDetailModal.jsx
-
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { X, Loader2, Truck } from "lucide-react";
@@ -9,12 +7,54 @@ import StatusBadge, {
   paymentStatusConfig,
 } from "./StatusBadge";
 import api from "@/lib/api";
+import { useToast } from "@/components/shared/Toast";
 
 export default function OrderDetailModal({ order, onClose, onStatusUpdate }) {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [newStatus, setNewStatus] = useState(order?.order_status);
   const [booking, setBooking] = useState(false);
   const [bookingResult, setBookingResult] = useState(null);
+  const { showToast } = useToast();
+
+  // ── PAYMENT UPDATE STATE ──────────────────────────────────────────────
+  const [payStatus, setPayStatus] = useState(order?.payment_status || "unpaid");
+  const [payMethod, setPayMethod] = useState(
+    order?.payment_method || "cash_on_delivery",
+  );
+  const [payRef, setPayRef] = useState(order?.payment_reference || "");
+  const [paidAmount, setPaidAmount] = useState(
+    order?.paid_amount ? String(order.paid_amount) : "",
+  );
+  const [updatingPayment, setUpdatingPayment] = useState(false);
+
+  // Save payment changes via PATCH /api/orders/{id}/payment
+  const handlePaymentUpdate = async () => {
+    setUpdatingPayment(true);
+    try {
+      const res = await api.patch(`/orders/${order.id}/payment`, {
+        payment_status: payStatus,
+        payment_method: payMethod,
+        payment_reference: payRef || null,
+        paid_amount: paidAmount === "" ? null : Number(paidAmount),
+      });
+      // Reflect the saved values back into the order object so the
+      // badges/labels in this modal update without a full refetch
+      order.payment_status = res.data.payment_status;
+      order.payment_method = res.data.payment_method;
+      order.payment_reference = res.data.payment_reference;
+      order.paid_amount = res.data.paid_amount;
+      showToast("Payment updated.", "success");
+    } catch (err) {
+      showToast("Could not update payment. Please try again.", "error", {
+        title: "Update failed",
+      });
+    } finally {
+      setUpdatingPayment(false);
+    }
+  };
+
+  // Show the TrxID + amount fields only when the payment isn't plain COD
+  const showPaymentDetails = ["bkash", "nagad", "partial"].includes(payMethod);
 
   // Update order status via PATCH /api/orders/{id}/status
   const handleStatusUpdate = async () => {
@@ -25,31 +65,61 @@ export default function OrderDetailModal({ order, onClose, onStatusUpdate }) {
         order_status: newStatus,
       });
       onStatusUpdate(order.id, newStatus);
+      showToast(
+        `Order #CF-${String(order.id).padStart(4, "0")} updated to ${newStatus}.`,
+        "success",
+      );
       onClose();
     } catch (err) {
-      console.error(err);
+      showToast("Could not update order status. Please try again.", "error", {
+        title: "Update failed",
+      });
     } finally {
       setUpdatingStatus(false);
     }
   };
 
-  // Book SteadFast consignment for this order
-  const handleBookSteadFast = async () => {
+  // Courier names we have real service integrations for.
+  // The "Book Courier" button only shows for these — orders with
+  // courier_name="own" or "manual" don't go through an API booking flow.
+  const BOOKABLE_COURIERS = ["steadfast", "pathao", "redx"];
+  const courierLabel = (name) =>
+    ({ steadfast: "SteadFast", pathao: "Pathao", redx: "RedX" })[name] || name;
+
+  // Book a courier consignment for this order.
+  // Courier-agnostic — same endpoint, same flow, regardless of which
+  // courier was chosen in the order form (Laravel's resolveCourier()
+  // picks the right service based on order.courier_name).
+  const handleBookCourier = async () => {
     setBooking(true);
     setBookingResult(null);
+    const label = courierLabel(order.courier_name);
     try {
       const res = await api.post(`/deliveries/book/${order.id}`);
       setBookingResult({
         success: true,
         tracking: res.data.tracking_code,
         consignment: res.data.consignment_id,
+        courier: res.data.courier_name,
       });
-      // Update order status to shipped in parent list
       onStatusUpdate(order.id, "shipped");
+      showToast(
+        `${label} booked! Tracking number: ${res.data.tracking_code}`,
+        "success",
+        { title: "Shipment booked" },
+      );
     } catch (err) {
+      const message = err.response?.data?.message || "";
+      showToast(
+        message.includes("already")
+          ? `This order already has a ${label} booking.`
+          : `Could not book ${label} right now. Please try again.`,
+        "error",
+        { title: "Booking failed" },
+      );
       setBookingResult({
         success: false,
-        message: err.response?.data?.message || "Booking failed. Try again.",
+        message: "Booking failed. Please try again.",
       });
     } finally {
       setBooking(false);
@@ -211,11 +281,12 @@ export default function OrderDetailModal({ order, onClose, onStatusUpdate }) {
             )}
           </div>
 
-          {/* ── STEADFAST BOOKING ────────────────────────────────────────── */}
+          {/* ── COURIER BOOKING ──────────────────────────────────────────── */}
           {/* Show booking button only when:
-              1. Courier is SteadFast
+              1. Courier is one we have an integration for (SteadFast,
+                 Pathao, or RedX) — not "own delivery" or "manual entry"
               2. No consignment has been booked yet */}
-          {order.courier_name === "steadfast" &&
+          {BOOKABLE_COURIERS.includes(order.courier_name) &&
             !order.delivery?.consignment_id &&
             !bookingResult?.success && (
               <div>
@@ -223,10 +294,10 @@ export default function OrderDetailModal({ order, onClose, onStatusUpdate }) {
                   className="text-xs font-medium text-muted-foreground
                             uppercase tracking-wider mb-2"
                 >
-                  SteadFast Courier
+                  {courierLabel(order.courier_name)} Courier
                 </p>
                 <Button
-                  onClick={handleBookSteadFast}
+                  onClick={handleBookCourier}
                   disabled={booking}
                   className="w-full gap-2"
                   variant="outline"
@@ -237,7 +308,8 @@ export default function OrderDetailModal({ order, onClose, onStatusUpdate }) {
                     </>
                   ) : (
                     <>
-                      <Truck className="w-4 h-4" /> Book SteadFast Consignment
+                      <Truck className="w-4 h-4" /> Book{" "}
+                      {courierLabel(order.courier_name)} Consignment
                     </>
                   )}
                 </Button>
@@ -256,7 +328,7 @@ export default function OrderDetailModal({ order, onClose, onStatusUpdate }) {
                 className="text-xs font-medium text-green-700
                             dark:text-green-300 mb-1"
               >
-                SteadFast Booked
+                {courierLabel(order.delivery.courier_name)} Booked
               </p>
               <p
                 className="text-sm font-mono font-bold text-green-800
@@ -297,6 +369,83 @@ export default function OrderDetailModal({ order, onClose, onStatusUpdate }) {
               )}
             </div>
           )}
+
+          {/* ── PAYMENT UPDATE ───────────────────────────────────────────── */}
+          {/* Log or update a payment after the order exists — e.g. customer
+              sends a bKash advance later, or pays the COD on delivery */}
+          <div>
+            <p
+              className="text-xs font-medium text-muted-foreground
+                          uppercase tracking-wider mb-2"
+            >
+              Payment
+            </p>
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  value={payStatus}
+                  onChange={(e) => setPayStatus(e.target.value)}
+                  className="text-sm border border-border rounded-md
+                             px-3 py-2 bg-background text-foreground
+                             focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  <option value="unpaid">Unpaid</option>
+                  <option value="partial">Partial</option>
+                  <option value="paid">Paid</option>
+                </select>
+                <select
+                  value={payMethod}
+                  onChange={(e) => setPayMethod(e.target.value)}
+                  className="text-sm border border-border rounded-md
+                             px-3 py-2 bg-background text-foreground
+                             focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  <option value="cash_on_delivery">Cash on Delivery</option>
+                  <option value="bkash">bKash</option>
+                  <option value="nagad">Nagad</option>
+                  <option value="partial">Partial</option>
+                </select>
+              </div>
+
+              {showPaymentDetails && (
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    placeholder="Transaction ID"
+                    value={payRef}
+                    onChange={(e) => setPayRef(e.target.value)}
+                    className="text-sm border border-border rounded-md
+                               px-3 py-2 bg-background text-foreground
+                               focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="Amount paid (৳)"
+                    value={paidAmount}
+                    onChange={(e) => setPaidAmount(e.target.value)}
+                    className="text-sm border border-border rounded-md
+                               px-3 py-2 bg-background text-foreground
+                               focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+              )}
+
+              <Button
+                onClick={handlePaymentUpdate}
+                disabled={updatingPayment}
+                size="sm"
+                variant="outline"
+                className="w-full"
+              >
+                {updatingPayment ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  "Update Payment"
+                )}
+              </Button>
+            </div>
+          </div>
 
           {/* ── STATUS UPDATE ────────────────────────────────────────────── */}
           <div>

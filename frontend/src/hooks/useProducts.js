@@ -1,12 +1,9 @@
-// Custom hook that handles all product data fetching
-// WHY hooks? So Products.jsx doesn't need to know HOW data is fetched
-// The page just calls useProducts() and gets data + actions back
-// If you change the API later, you only change this file
-
 import { useState, useEffect, useCallback } from "react";
+import { useToast } from "@/components/shared/Toast";
 import api from "@/lib/api";
 
 export default function useProducts() {
+  const { showToast } = useToast();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -19,7 +16,11 @@ export default function useProducts() {
       setProducts(res.data.data || res.data);
     } catch (err) {
       setError("Failed to load products");
-      console.error(err);
+      showToast(
+        "Could not load your products. Please refresh the page.",
+        "error",
+        { title: "Loading failed" },
+      );
     } finally {
       setLoading(false);
     }
@@ -29,31 +30,46 @@ export default function useProducts() {
     fetchProducts();
   }, [fetchProducts]);
 
-  const deleteProduct = async (id) => {
-    if (!window.confirm("Delete this product? This cannot be undone.")) return;
+  const deleteProduct = async (id, confirmFn) => {
+    if (confirmFn) {
+      const ok = await confirmFn({
+        title: "Delete Product",
+        description:
+          "This will permanently delete the product, all its variants, and stock records. This cannot be undone.",
+        confirmText: "Delete Product",
+        cancelText: "Keep it",
+        type: "danger",
+      });
+      if (!ok) return;
+    }
     try {
       await api.delete(`/products/${id}`);
       setProducts((prev) => prev.filter((p) => p.id !== id));
-      // Remove from local state immediately — no refetch needed
+      showToast("Product deleted successfully.", "success");
     } catch (err) {
-      console.error(err);
+      showToast("Could not delete this product. Please try again.", "error", {
+        title: "Delete failed",
+      });
     }
   };
 
   const toggleStatus = async (product) => {
     try {
-      await api.put(`/products/${product.id}`, {
-        status: product.status === "active" ? "inactive" : "active",
-      });
+      await api.patch(`/products/${product.id}/status`);
+      const newStatus = product.status === "active" ? "inactive" : "active";
       setProducts((prev) =>
         prev.map((p) =>
-          p.id === product.id
-            ? { ...p, status: p.status === "active" ? "inactive" : "active" }
-            : p,
+          p.id === product.id ? { ...p, status: newStatus } : p,
         ),
       );
+      showToast(
+        newStatus === "active"
+          ? `"${product.name}" is now active and available for orders.`
+          : `"${product.name}" is now inactive and hidden from orders.`,
+        "info",
+      );
     } catch (err) {
-      console.error(err);
+      showToast("Could not update product status. Please try again.", "error");
     }
   };
 

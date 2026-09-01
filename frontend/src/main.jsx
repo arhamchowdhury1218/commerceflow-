@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { ThemeProvider } from "./components/theme-provider";
 import App from "./App.jsx";
 import "./index.css";
+import { ToastProvider } from "@/components/shared/Toast";
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
@@ -12,7 +13,9 @@ createRoot(document.getElementById("root")).render(
       enableSystem
       disableTransitionOnChange
     >
-      <App />
+      <ToastProvider>
+        <App />
+      </ToastProvider>
     </ThemeProvider>
   </StrictMode>,
 );

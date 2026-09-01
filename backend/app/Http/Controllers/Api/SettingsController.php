@@ -35,6 +35,11 @@ class SettingsController extends Controller
                 'steadfast_test_mode'  => config('services.steadfast.test_mode'),
                 'mail_configured'      => !empty(config('mail.from.address')),
                 'mail_from'            => config('mail.from.address'),
+                // Facebook page connection — true if both the page ID and
+                // token are saved. We never send the token itself back.
+                'facebook_configured'  => !empty($business->facebook_page_id)
+                    && !empty($business->facebook_page_token),
+                'facebook_page_id'     => $business->facebook_page_id,
             ],
         ]);
     }
@@ -61,6 +66,29 @@ class SettingsController extends Controller
         return response()->json([
             'message'  => 'Business updated successfully',
             'business' => $business,
+        ]);
+    }
+
+    // PUT /api/settings/facebook
+    // Saves the Facebook Page connection (page ID + Page Access Token).
+    // The token is stored but never returned to the frontend.
+    public function updateFacebook(Request $request)
+    {
+        $request->validate([
+            'facebook_page_id'    => 'required|string|max:255',
+            'facebook_page_token' => 'required|string',
+        ]);
+
+        $business = $request->user()->business;
+        $business->update([
+            'facebook_page_id'    => $request->facebook_page_id,
+            'facebook_page_token' => $request->facebook_page_token,
+        ]);
+
+        return response()->json([
+            'message'             => 'Facebook page connected successfully',
+            'facebook_configured' => true,
+            'facebook_page_id'    => $business->facebook_page_id,
         ]);
     }
 

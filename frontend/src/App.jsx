@@ -3,6 +3,7 @@ import { ThemeProvider } from "./components/theme-provider";
 import DashboardLayout from "./layouts/DashboardLayout";
 import Dashboard from "./pages/Dashboard";
 import Orders from "./pages/Orders";
+import Inbox from "./pages/Inbox";
 import Customers from "./pages/Customers";
 import Products from "./pages/Products.jsx";
 import Login from "./pages/Login";
@@ -11,6 +12,7 @@ import NewOrder from "./pages/NewOrder";
 import Deliveries from "./pages/Deliveries";
 import Settings from "./pages/Settings";
 import Analytics from "./pages/Analytics";
+import ResetPassword from "./pages/ResetPassword";
 
 // Protects routes that require login
 // If no token → redirect to /login
@@ -29,6 +31,7 @@ export default function App() {
         <Routes>
           {/* Public — no login needed */}
           <Route path="/login" element={<Login />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
 
           {/* Protected — must be logged in */}
           <Route
@@ -40,6 +43,7 @@ export default function App() {
             }
           >
             <Route index element={<Dashboard />} />
+            <Route path="inbox" element={<Inbox />} />
             <Route path="orders" element={<Orders />} />
             <Route path="customers" element={<Customers />} />
             <Route path="products" element={<Products />} />

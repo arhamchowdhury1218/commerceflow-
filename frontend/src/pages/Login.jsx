@@ -1,11 +1,7 @@
-// src/pages/Login.jsx
-// Real login page connected to Laravel API
-// Has both Login and Register tabs
-
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Loader2, ArrowLeft, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import useAuthStore from "@/store/authStore";
@@ -15,21 +11,14 @@ export default function Login() {
   const navigate = useNavigate();
   const { setToken, setUser } = useAuthStore();
 
-  // tab controls whether we show Login or Register form
+  // tab: 'login' | 'register' | 'forgot'
   const [tab, setTab] = useState("login");
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
-
-  // error stores the error message from Laravel
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
-  // loginData stores the input values for the login form
-  const [loginData, setLoginData] = useState({
-    email: "",
-    password: "",
-  });
-
-  // registerData stores the input values for the register form
+  const [loginData, setLoginData] = useState({ email: "", password: "" });
   const [registerData, setRegisterData] = useState({
     name: "",
     email: "",
@@ -37,15 +26,11 @@ export default function Login() {
     password: "",
     password_confirmation: "",
   });
+  const [forgotEmail, setForgotEmail] = useState("");
 
-  // Generic change handler for login form
-  // e.target.name matches the field name in loginData
   const handleLoginChange = (e) => {
     setLoginData({ ...loginData, [e.target.name]: e.target.value });
-    // spread operator copies all existing fields
-    // [e.target.name] dynamically sets the changed field
-    // Example: typing in email field → { email: 'new@value.com', password: '' }
-    setError(""); // clear error when user starts typing
+    setError("");
   };
 
   const handleRegisterChange = (e) => {
@@ -53,94 +38,82 @@ export default function Login() {
     setError("");
   };
 
-  // LOGIN SUBMIT
   const handleLogin = async (e) => {
     e.preventDefault();
-    // e.preventDefault() stops the browser from reloading the page
-    // HTML forms reload by default — we want to handle it in JS
-
     setLoading(true);
     setError("");
-
     try {
-      // POST to /api/login with email and password
       const res = await api.post("/login", loginData);
-
-      // Laravel returns { token, user, business }
       setToken(res.data.token);
-      // Save token to Zustand (and localStorage via persist)
-
-      setUser({
-        ...res.data.user,
-        business: res.data.business,
-      });
-      // Save user info globally
-
+      setUser({ ...res.data.user, business: res.data.business });
       navigate("/");
-      // Redirect to dashboard
     } catch (err) {
-      // Laravel returns validation errors in err.response.data.errors
-      // or a message in err.response.data.message
-      if (err.response?.data?.errors?.email) {
-        setError(err.response.data.errors.email[0]);
-      } else if (err.response?.data?.message) {
-        setError(err.response.data.message);
-      } else {
-        setError("Something went wrong. Please try again.");
-      }
+      const errors = err.response?.data?.errors;
+      if (errors?.email) setError(errors.email[0]);
+      else setError(err.response?.data?.message || "Login failed.");
     } finally {
       setLoading(false);
-      // finally runs whether request succeeded or failed
     }
   };
 
-  // REGISTER SUBMIT
   const handleRegister = async (e) => {
     e.preventDefault();
-
-    // Client-side validation before sending to server
     if (registerData.password !== registerData.password_confirmation) {
       setError("Passwords do not match");
       return;
     }
-
     setLoading(true);
     setError("");
-
     try {
       const res = await api.post("/register", registerData);
-
       setToken(res.data.token);
-      setUser({
-        ...res.data.user,
-        business: res.data.business,
-      });
-
+      setUser({ ...res.data.user, business: res.data.business });
       navigate("/");
     } catch (err) {
-      // Laravel returns field-specific errors for validation failures
       const errors = err.response?.data?.errors;
-      if (errors) {
-        // Get first error from any field
-        const firstError = Object.values(errors)[0][0];
-        setError(firstError);
-      } else {
-        setError(err.response?.data?.message || "Registration failed.");
-      }
+      setError(
+        errors
+          ? Object.values(errors)[0][0]
+          : err.response?.data?.message || "Registration failed.",
+      );
     } finally {
       setLoading(false);
     }
   };
 
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    setSuccess("");
+    try {
+      const res = await api.post("/forgot-password", { email: forgotEmail });
+      setSuccess(res.data.message);
+    } catch (err) {
+      setError(err.response?.data?.message || "Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const switchTab = (t) => {
+    setTab(t);
+    setError("");
+    setSuccess("");
+  };
+
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <div
+      className="min-h-screen bg-background flex items-center
+                    justify-center p-4"
+    >
       <motion.div
         initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
         className="w-full max-w-md"
       >
-        {/* LOGO */}
+        {/* Logo */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold tracking-tight">
             <span className="text-primary">Commerce</span>Flow
@@ -150,31 +123,50 @@ export default function Login() {
           </p>
         </div>
 
-        {/* CARD */}
-        <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
-          {/* TABS — Login / Register */}
-          <div className="flex border-b border-border">
-            {["login", "register"].map((t) => (
+        <div
+          className="bg-card border border-border rounded-2xl
+                        shadow-sm overflow-hidden"
+        >
+          {/* Tabs — only show for login/register */}
+          {tab !== "forgot" && (
+            <div className="flex border-b border-border">
+              {["login", "register"].map((t) => (
+                <button
+                  key={t}
+                  onClick={() => switchTab(t)}
+                  className={`flex-1 py-3.5 text-sm font-medium
+                    transition-colors
+                    ${
+                      tab === t
+                        ? "bg-background text-foreground border-b-2 border-primary"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                >
+                  {t === "login" ? "Sign In" : "Create Account"}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Forgot password header */}
+          {tab === "forgot" && (
+            <div
+              className="flex items-center gap-3 px-5 py-4
+                            border-b border-border"
+            >
               <button
-                key={t}
-                onClick={() => {
-                  setTab(t);
-                  setError("");
-                }}
-                className={`flex-1 py-3.5 text-sm font-medium transition-colors
-                  ${
-                    tab === t
-                      ? "bg-background text-foreground border-b-2 border-primary"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
+                onClick={() => switchTab("login")}
+                className="text-muted-foreground hover:text-foreground
+                           transition-colors"
               >
-                {t === "login" ? "Sign In" : "Create Account"}
+                <ArrowLeft className="w-4 h-4" />
               </button>
-            ))}
-          </div>
+              <span className="text-sm font-medium">Reset Password</span>
+            </div>
+          )}
 
           <div className="p-6">
-            {/* ERROR MESSAGE */}
+            {/* Error */}
             <AnimatePresence>
               {error && (
                 <motion.div
@@ -189,8 +181,26 @@ export default function Login() {
               )}
             </AnimatePresence>
 
-            {/* LOGIN FORM */}
+            {/* Success */}
+            <AnimatePresence>
+              {success && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="bg-green-50 dark:bg-green-950 border
+                             border-green-200 dark:border-green-800
+                             text-green-700 dark:text-green-300 text-sm
+                             rounded-lg px-4 py-3 mb-4 flex items-start gap-2"
+                >
+                  <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <span>{success}</span>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             <AnimatePresence mode="wait">
+              {/* LOGIN FORM */}
               {tab === "login" && (
                 <motion.form
                   key="login"
@@ -215,7 +225,17 @@ export default function Login() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-sm font-medium">Password</label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium">Password</label>
+                      {/* Forgot password link */}
+                      <button
+                        type="button"
+                        onClick={() => switchTab("forgot")}
+                        className="text-xs text-primary hover:underline"
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
                     <div className="relative">
                       <Input
                         type={showPass ? "text" : "password"}
@@ -227,7 +247,6 @@ export default function Login() {
                         autoComplete="current-password"
                         className="pr-10"
                       />
-                      {/* Toggle password visibility */}
                       <button
                         type="button"
                         onClick={() => setShowPass(!showPass)}
@@ -252,8 +271,6 @@ export default function Login() {
                     ) : (
                       "Sign In"
                     )}
-                    {/* animate-spin = Tailwind class that rotates the icon */}
-                    {/* gives visual feedback that a request is in progress */}
                   </Button>
                 </motion.form>
               )}
@@ -272,7 +289,6 @@ export default function Login() {
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium">Your Name</label>
                     <Input
-                      type="text"
                       name="name"
                       placeholder="Rahim Uddin"
                       value={registerData.name}
@@ -280,11 +296,9 @@ export default function Login() {
                       required
                     />
                   </div>
-
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium">Business Name</label>
                     <Input
-                      type="text"
                       name="business_name"
                       placeholder="Rahim Fashion House"
                       value={registerData.business_name}
@@ -292,7 +306,6 @@ export default function Login() {
                       required
                     />
                   </div>
-
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium">Email</label>
                     <Input
@@ -304,7 +317,6 @@ export default function Login() {
                       required
                     />
                   </div>
-
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium">Password</label>
                     <div className="relative">
@@ -331,7 +343,6 @@ export default function Login() {
                       </button>
                     </div>
                   </div>
-
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium">
                       Confirm Password
@@ -345,18 +356,95 @@ export default function Login() {
                       required
                     />
                   </div>
-
                   <Button type="submit" className="w-full" disabled={loading}>
                     {loading ? (
                       <>
                         <Loader2 className="w-4 h-4 mr-2 animate-spin" />{" "}
-                        Creating account...
+                        Creating...
                       </>
                     ) : (
                       "Create Account"
                     )}
                   </Button>
                 </motion.form>
+              )}
+
+              {/* FORGOT PASSWORD FORM */}
+              {tab === "forgot" && (
+                <motion.div
+                  key="forgot"
+                  initial={{ opacity: 0, x: 16 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -16 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  {!success ? (
+                    <form onSubmit={handleForgotPassword} className="space-y-4">
+                      <div>
+                        <p className="text-sm text-muted-foreground mb-4">
+                          Enter your email address and we will send you a link
+                          to reset your password.
+                        </p>
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-medium">Email</label>
+                          <Input
+                            type="email"
+                            placeholder="you@example.com"
+                            value={forgotEmail}
+                            onChange={(e) => {
+                              setForgotEmail(e.target.value);
+                              setError("");
+                            }}
+                            required
+                          />
+                        </div>
+                      </div>
+                      <Button
+                        type="submit"
+                        className="w-full"
+                        disabled={loading}
+                      >
+                        {loading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />{" "}
+                            Sending...
+                          </>
+                        ) : (
+                          "Send Reset Link"
+                        )}
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={() => switchTab("login")}
+                        className="w-full text-sm text-muted-foreground
+                                   hover:text-foreground transition-colors"
+                      >
+                        Back to Sign In
+                      </button>
+                    </form>
+                  ) : (
+                    // Success state — show confirmation
+                    <div className="text-center space-y-4 py-2">
+                      <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto" />
+                      <div>
+                        <p className="font-medium text-sm">Check your email</p>
+                        <p className="text-muted-foreground text-sm mt-1">
+                          We sent a reset link to{" "}
+                          <span className="font-medium text-foreground">
+                            {forgotEmail}
+                          </span>
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        className="w-full"
+                        onClick={() => switchTab("login")}
+                      >
+                        Back to Sign In
+                      </Button>
+                    </div>
+                  )}
+                </motion.div>
               )}
             </AnimatePresence>
           </div>

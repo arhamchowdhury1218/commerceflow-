@@ -11,8 +11,10 @@ import AddCustomerModal from "@/components/customers/AddCustomerModal";
 import CustomerDetailModal from "@/components/customers/CustomerDetailModal";
 import useCustomers from "@/hooks/useCustomers";
 import api from "@/lib/api";
+import { useConfirmDialog } from "@/components/shared/ConfirmDialog";
 
 export default function Customers() {
+  const { confirm, ConfirmDialogComponent } = useConfirmDialog();
   const { customers, loading, fetchCustomers, deleteCustomer } = useCustomers();
 
   const [search, setSearch] = useState("");
@@ -44,6 +46,17 @@ export default function Customers() {
     (sum, c) => sum + (c.orders_count || 0),
     0,
   );
+
+  const handleDelete = async (id) => {
+    const ok = await confirm({
+      title: "Delete Customer",
+      description: "This will remove the customer and all their data.",
+      confirmText: "Delete Customer",
+      type: "danger",
+    });
+    if (!ok) return;
+    await deleteCustomer(id);
+  };
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -106,7 +119,7 @@ export default function Customers() {
               key={customer.id}
               customer={customer}
               index={index}
-              onDelete={deleteCustomer}
+              onDelete={handleDelete}
               onView={handleViewCustomer}
             />
           ))}
@@ -130,6 +143,7 @@ export default function Customers() {
           />
         )}
       </AnimatePresence>
+      {ConfirmDialogComponent}
     </div>
   );
 }

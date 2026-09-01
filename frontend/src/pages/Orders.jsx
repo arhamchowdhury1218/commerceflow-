@@ -8,6 +8,7 @@ import PageHeader from "@/components/shared/PageHeader";
 import SearchBar from "@/components/shared/SearchBar";
 import EmptyState from "@/components/shared/EmptyState";
 import LoadingSpinner from "@/components/shared/LoadingSpinner";
+import { orderIdMatches } from "@/lib/utils";
 import OrderFilterTabs from "@/components/orders/OrderFilterTabs";
 import OrdersTable from "@/components/orders/OrdersTable";
 import OrderDetailModal from "@/components/orders/OrderDetailModal";
@@ -22,11 +23,12 @@ export default function Orders() {
   const [selectedOrder, setSelectedOrder] = useState(null);
 
   const filtered = orders.filter((o) => {
+    const rawSearch = search.trim().toLowerCase();
     const matchesSearch =
       search === "" ||
-      String(o.id).includes(search) ||
-      o.customer?.name?.toLowerCase().includes(search.toLowerCase()) ||
-      o.customer?.phone?.includes(search);
+      orderIdMatches(o.id, search) ||
+      o.customer?.name?.toLowerCase().includes(rawSearch) ||
+      o.customer?.phone?.includes(search.trim());
 
     const matchesStatus =
       statusFilter === "all" || o.order_status === statusFilter;

@@ -24,6 +24,8 @@ class Order extends Model
         'courier_name',
         'source_channel',
         'notes',
+        'paid_amount',
+        'payment_reference',
     ];
 
     protected $casts = [
@@ -32,6 +34,7 @@ class Order extends Model
         'discount'        => 'decimal:2',
         'delivery_charge' => 'decimal:2',
         'total_amount'    => 'decimal:2',
+        'paid_amount'     => 'decimal:2',
     ];
 
     // Order belongs to one business

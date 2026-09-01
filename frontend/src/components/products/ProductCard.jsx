@@ -1,18 +1,32 @@
+// src/components/products/ProductCard.jsx
+//
+// Product card layout:
+//   TOP    → product name, price, status badge, action buttons (Edit/Deactivate/Delete)
+//   MIDDLE → product images (thumbnails, click to open fullscreen)
+//   BOTTOM → stock info, expand/collapse variants table
+//
+// Edit button opens EditProductModal for full editing
+
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, ChevronUp, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Trash2, Pencil } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import StockBadge from "./StockBadge";
+import ProductImageGallery from "./ProductImageGallery";
+import EditProductModal from "./EditProductModal";
 
 export default function ProductCard({
   product,
   index,
   onDelete,
   onToggleStatus,
+  onSuccess,
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
 
+  // ── STOCK CALCULATIONS ────────────────────────────────────────────────
   const totalStock =
     product.variants?.reduce(
       (sum, v) => sum + (v.inventory?.quantity || 0),
@@ -38,11 +52,14 @@ export default function ProductCard({
     >
       <Card
         className={`overflow-hidden transition-shadow hover:shadow-md
+        flex flex-col
         ${product.status === "inactive" ? "opacity-60" : ""}`}
       >
-        <div className="p-4 md:p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1 min-w-0">
+        <div className="p-4 md:p-5 space-y-3">
+          {/* ── ROW 1: NAME + ACTIONS ─────────────────────────────────────── */}
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              {/* Name + status badge */}
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-semibold text-sm md:text-base truncate">
                   {product.name}
@@ -59,25 +76,45 @@ export default function ProductCard({
                   {product.status === "active" ? "Active" : "Inactive"}
                 </span>
               </div>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                Base price: ৳{Number(product.base_price).toLocaleString()}
+
+              {/* Base price */}
+              <p className="text-sm font-semibold text-primary mt-0.5 tabular-nums">
+                ৳{Number(product.base_price).toLocaleString()}
               </p>
+
+              {/* Description — one line */}
               {product.description && (
-                <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
+                <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
                   {product.description}
                 </p>
               )}
             </div>
 
-            <div className="flex items-center gap-1.5 flex-shrink-0">
+            {/* Action buttons */}
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {/* Edit — opens EditProductModal */}
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-8 text-xs gap-1 hidden sm:flex"
+                className="h-8 text-xs gap-1.5 hidden sm:flex"
+                onClick={() => setShowEdit(true)}
+              >
+                <Pencil className="w-3 h-3" /> Edit
+              </Button>
+
+              {/* Activate / Deactivate
+                  Calls PATCH /products/{id}/status via onToggleStatus
+                  which maps to ProductController@toggleStatus — no body needed */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs hidden sm:flex"
                 onClick={() => onToggleStatus(product)}
               >
                 {product.status === "active" ? "Deactivate" : "Activate"}
               </Button>
+
+              {/* Delete */}
               <Button
                 variant="ghost"
                 size="icon"
@@ -89,13 +126,22 @@ export default function ProductCard({
             </div>
           </div>
 
-          <div className="flex items-center gap-3 mt-3 flex-wrap">
+          {/* ── ROW 2: PRODUCT IMAGES ───────────────────────────────────────
+              Sits below name — two small thumbnails
+              Clicking opens fullscreen lightbox */}
+          <ProductImageGallery
+            images={product.images || []}
+            productName={product.name}
+          />
+
+          {/* ── ROW 3: STOCK SUMMARY ──────────────────────────────────────── */}
+          <div className="flex items-center gap-3 flex-wrap">
             <span className="text-xs text-muted-foreground">
               {product.variants?.length || 0} variant
               {product.variants?.length !== 1 ? "s" : ""}
             </span>
             <span className="text-xs text-muted-foreground">
-              {totalStock} total stock
+              {totalStock} in stock
             </span>
             {outOfStockCount > 0 && (
               <span className="text-xs text-red-500 font-medium">
@@ -110,12 +156,13 @@ export default function ProductCard({
           </div>
         </div>
 
+        {/* ── EXPAND/COLLAPSE VARIANTS ──────────────────────────────────────── */}
         <button
           onClick={() => setExpanded(!expanded)}
-          className="w-full flex items-center justify-between px-4 md:px-5
-                     py-2.5 border-t border-border bg-muted/30
-                     hover:bg-muted/60 transition-colors text-xs
-                     font-medium text-muted-foreground"
+          className="w-full flex items-center justify-between
+                     px-4 md:px-5 py-2.5 border-t border-border
+                     bg-muted/30 hover:bg-muted/60 transition-colors
+                     text-xs font-medium text-muted-foreground"
         >
           <span>{expanded ? "Hide" : "Show"} variants</span>
           {expanded ? (
@@ -125,6 +172,7 @@ export default function ProductCard({
           )}
         </button>
 
+        {/* ── VARIANTS TABLE ────────────────────────────────────────────────── */}
         <AnimatePresence>
           {expanded && (
             <motion.div
@@ -176,6 +224,20 @@ export default function ProductCard({
           )}
         </AnimatePresence>
       </Card>
+
+      {/* Edit Product Modal — rendered outside Card to avoid z-index issues */}
+      <AnimatePresence>
+        {showEdit && (
+          <EditProductModal
+            product={product}
+            onClose={() => setShowEdit(false)}
+            onSuccess={() => {
+              onSuccess?.();
+              setShowEdit(false);
+            }}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

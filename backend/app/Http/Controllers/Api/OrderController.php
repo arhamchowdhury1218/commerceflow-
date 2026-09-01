@@ -27,91 +27,110 @@ class OrderController extends Controller
         return response()->json($orders);
     }
 
-    // POST /api/orders
     public function store(Request $request)
     {
         $request->validate([
-            'customer_id'              => 'required|exists:customers,id',
-            'items'                    => 'required|array|min:1',
-            'items.*.product_variant_id' => 'required|exists:product_variants,id',
-            'items.*.quantity'         => 'required|integer|min:1',
-            'delivery_charge'          => 'nullable|numeric|min:0',
-            'discount'                 => 'nullable|numeric|min:0',
-            'payment_method'           => 'nullable|string',
-            'payment_status'           => 'nullable|string',
-            'courier_name'             => 'nullable|string',
-            'source_channel'           => 'nullable|string',
-            'notes'                    => 'nullable|string',
-            'is_preorder'              => 'boolean',
+            'customer_id'                       => 'required|exists:customers,id',
+            'items'                             => 'required|array|min:1',
+            'items.*.product_variant_id'        => 'required|exists:product_variants,id',
+            'items.*.quantity'                  => 'required|integer|min:1',
+            'items.*.unit_price'                => 'required|numeric|min:0',
+            'items.*.subtotal'                  => 'required|numeric|min:0',
         ]);
 
-        $businessId = $request->user()->business->id;
+        return DB::transaction(function () use ($request) {
 
-        // DB::transaction ensures ALL database operations succeed or ALL fail
-        // If inventory update fails, the order is NOT created
-        // This prevents inconsistent data
-        $order = DB::transaction(function () use ($request, $businessId) {
-
-            $subtotal = 0;
-
-            // Calculate subtotal from all items
+            // ── STOCK VALIDATION BEFORE ANYTHING ──────────────────────────────
+            // Check every item has enough stock before creating the order
+            // This prevents the UNSIGNED integer SQL error from going negative
+            // Runs BEFORE any database writes so nothing is saved if stock fails
             foreach ($request->items as $item) {
-                $variant   = \App\Models\ProductVariant::find($item['product_variant_id']);
-                $unitPrice = $variant->price ?? $variant->product->base_price;
-                $subtotal += $unitPrice * $item['quantity'];
-            }
 
-            $deliveryCharge = $request->delivery_charge ?? 0;
-            $discount       = $request->discount ?? 0;
-            $totalAmount    = $subtotal + $deliveryCharge - $discount;
+                // Skip stock check for pre-orders entirely
+                if ($request->is_preorder) continue;
 
-            // Create the order
-            $order = Order::create([
-                'business_id'    => $businessId,
-                'customer_id'    => $request->customer_id,
-                'is_preorder'    => $request->is_preorder ?? false,
-                'subtotal'       => $subtotal,
-                'discount'       => $discount,
-                'delivery_charge' => $deliveryCharge,
-                'total_amount'   => $totalAmount,
-                'order_status'   => 'pending',
-                'payment_status' => $request->payment_status ?? 'unpaid',
-                'payment_method' => $request->payment_method,
-                'courier_name'   => $request->courier_name,
-                'source_channel' => $request->source_channel,
-                'notes'          => $request->notes,
-            ]);
+                $variantId = $item['product_variant_id'];
+                // ↑ frontend sends product_variant_id — match that here
 
-            // Create order items and deduct inventory
-            foreach ($request->items as $item) {
-                $variant   = \App\Models\ProductVariant::find($item['product_variant_id']);
-                $unitPrice = $variant->price ?? $variant->product->base_price;
-                $subtotalItem = $unitPrice * $item['quantity'];
+                $variant   = \App\Models\ProductVariant::with('inventory', 'product')
+                    ->find($variantId);
+                $inventory = $variant?->inventory;
 
-                OrderItem::create([
-                    'order_id'           => $order->id,
-                    'product_variant_id' => $item['product_variant_id'],
-                    'quantity'           => $item['quantity'],
-                    'unit_price'         => $unitPrice,
-                    'subtotal'           => $subtotalItem,
-                ]);
+                $available = $inventory?->quantity ?? 0;
+                $requested = (int) $item['quantity'];
 
-                // Deduct stock — only if NOT a pre-order
-                if (!$order->is_preorder) {
-                    Inventory::where('product_variant_id', $item['product_variant_id'])
-                        ->decrement('quantity', $item['quantity']);
-                    // decrement() subtracts the quantity atomically
-                    // safer than read-then-write in concurrent situations
+                if ($requested > $available) {
+                    $productName  = $variant?->product?->name ?? 'Product';
+                    $variantLabel = implode(' / ', array_filter([
+                        $variant?->color,
+                        $variant?->size,
+                    ])) ?: 'Default';
+
+                    // Throw friendly message — never expose SQL to seller
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'items' => [
+                            $available === 0
+                                ? "{$productName} ({$variantLabel}) is out of stock. Please remove it from the order."
+                                : "Only {$available} left in stock for {$productName} ({$variantLabel}). You tried to order {$requested}."
+                        ]
+                    ]);
                 }
             }
 
-            return $order;
-        });
+            // ── CREATE ORDER ───────────────────────────────────────────────────
+            $businessId = $request->user()->business->id;
 
-        return response()->json(
-            $order->load(['customer', 'items.variant.product']),
-            201
-        );
+            // Calculate totals from items if not passed from frontend
+            $subtotal = collect($request->items)
+                ->sum(fn($i) => $i['unit_price'] * $i['quantity']);
+
+            $discount      = (float) ($request->discount       ?? 0);
+            $deliveryCharge = (float) ($request->delivery_charge ?? 0);
+            $totalAmount   = $subtotal + $deliveryCharge - $discount;
+
+            $order = Order::create([
+                'business_id'       => $businessId,
+                'customer_id'       => $request->customer_id,
+                'order_status'      => 'pending',
+                'payment_status'    => $request->payment_status  ?? 'unpaid',
+                'payment_method'    => $request->payment_method  ?? null,
+                'payment_reference' => $request->payment_reference ?? null,   // ← add
+                'courier_name'      => $request->courier_name    ?? null,
+                'source_channel'    => $request->source_channel  ?? null,
+                'subtotal'          => $subtotal,
+                'discount'          => $discount,
+                'delivery_charge'   => $deliveryCharge,
+                'total_amount'      => $totalAmount,
+                'paid_amount'       => (float) ($request->paid_amount ?? 0),  // ← add
+                'notes'             => $request->notes           ?? null,
+                'is_preorder'       => $request->is_preorder     ?? false,
+            ]);
+
+            // ── CREATE ITEMS + DEDUCT STOCK ────────────────────────────────────
+            foreach ($request->items as $item) {
+                $variantId = $item['product_variant_id'];
+
+                $order->items()->create([
+                    'product_variant_id' => $variantId,
+                    'quantity'           => $item['quantity'],
+                    'unit_price'         => $item['unit_price'],
+                    'subtotal'           => $item['unit_price'] * $item['quantity'],
+                ]);
+
+                // Only deduct stock for real orders — pre-orders skip this
+                if (!$request->is_preorder) {
+                    // Safe to decrement now — stock was validated above
+                    // Stock will never go negative because of the check above
+                    Inventory::where('product_variant_id', $variantId)
+                        ->decrement('quantity', $item['quantity']);
+                }
+            }
+
+            return response()->json(
+                $order->load(['customer', 'items.variant.product']),
+                201
+            );
+        });
     }
 
     // GET /api/orders/{id}
@@ -155,36 +174,52 @@ class OrderController extends Controller
 
         $order->update(['order_status' => $request->order_status]);
 
-        // ── SYNC DELIVERY STATUS ───────────────────────────────────────────
-        // When order status changes, also update the delivery record
-        // so the Deliveries page stays in sync
+        // Sync delivery status
         $delivery = $order->delivery;
-
         if ($delivery) {
             $deliveryStatusMap = [
                 'shipped'   => 'pending',
-                // shipped = SteadFast has it, pending pickup
                 'delivered' => 'delivered',
                 'returned'  => 'returned',
                 'cancelled' => 'cancelled',
             ];
-
             if (isset($deliveryStatusMap[$request->order_status])) {
                 $delivery->update([
                     'delivery_status' => $deliveryStatusMap[$request->order_status],
-                    // If marking delivered, set the delivered_at timestamp
-                    'delivered_at' => $request->order_status === 'delivered'
-                        ? now()
-                        : $delivery->delivered_at,
+                    'delivered_at'    => $request->order_status === 'delivered'
+                        ? now() : $delivery->delivered_at,
                 ]);
             }
         }
-        // ── END SYNC ───────────────────────────────────────────────────────
 
         // Send email notification
-        $order->load('customer');
-        $notificationService = new \App\Services\NotificationService();
-        $notificationService->sendOrderEmail($order, $request->order_status);
+        try {
+            $order->load('customer');
+
+            \Log::info('Attempting to send email', [
+                'order_id'      => $order->id,
+                'status'        => $request->order_status,
+                'customer_email' => $order->customer?->email,
+                'mail_host'     => config('mail.mailers.smtp.host'),
+                'mail_port'     => config('mail.mailers.smtp.port'),
+                'mail_username' => config('mail.mailers.smtp.username'),
+                'mail_from'     => config('mail.from.address'),
+            ]);
+
+            $notificationService = new \App\Services\NotificationService();
+            $notificationService->sendOrderEmail($order, $request->order_status);
+
+            \Log::info('Email sent successfully', [
+                'order_id' => $order->id,
+                'status'   => $request->order_status,
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Email send failed in updateStatus', [
+                'order_id' => $order->id,
+                'error'    => $e->getMessage(),
+                'trace'    => $e->getTraceAsString(),
+            ]);
+        }
 
         return response()->json($order);
     }
@@ -197,13 +232,29 @@ class OrderController extends Controller
         }
 
         $request->validate([
-            'payment_status' => 'required|in:unpaid,partial,paid',
-            'payment_method' => 'nullable|string',
+            'payment_status'    => 'required|in:unpaid,partial,paid',
+            'payment_method'    => 'nullable|string',
+            'payment_reference' => 'nullable|string|max:191',
+            'paid_amount'       => 'nullable|numeric|min:0',
         ]);
 
+        // Work out how much has been paid.
+        // If the seller marked it fully paid but didn't type an amount,
+        // assume the whole order total was paid — saves them a step.
+        $paidAmount = $request->paid_amount;
+        if ($paidAmount === null) {
+            $paidAmount = match ($request->payment_status) {
+                'paid'   => $order->total_amount,
+                'unpaid' => 0,
+                default  => $order->paid_amount, // partial → keep existing
+            };
+        }
+
         $order->update([
-            'payment_status' => $request->payment_status,
-            'payment_method' => $request->payment_method,
+            'payment_status'    => $request->payment_status,
+            'payment_method'    => $request->payment_method,
+            'payment_reference' => $request->payment_reference,
+            'paid_amount'       => $paidAmount,
         ]);
 
         return response()->json($order);

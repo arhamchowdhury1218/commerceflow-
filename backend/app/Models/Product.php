@@ -17,20 +17,38 @@ class Product extends Model
         'status',
         'description',
         'image',
+        'images',
     ];
 
     protected $casts = [
         'base_price' => 'decimal:2',
-        // decimal:2 keeps exactly 2 decimal places: 1200.00
+        'images'     => 'array',
     ];
 
-    // Product belongs to one business
+    // Override the images getter to ALWAYS return an array
+    // even when the database value is null
+    public function getImagesAttribute($value): array
+    {
+        if (empty($value)) return [];
+        $decoded = json_decode($value, true);
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    // Main image is always the first image in the array
+    // Returns null if no images uploaded yet
+    public function getMainImageAttribute(): ?string
+    {
+        $images = $this->getImagesAttribute(
+            $this->attributes['images'] ?? null
+        );
+        return $images[0] ?? null;
+    }
+
     public function business()
     {
         return $this->belongsTo(Business::class);
     }
 
-    // Product has many variants (Red XL, Blue M etc.)
     public function variants()
     {
         return $this->hasMany(ProductVariant::class);
